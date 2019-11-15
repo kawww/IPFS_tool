@@ -1,56 +1,81 @@
-<meta charset="utf-8">
-<title>IPFS tool</title>
-<script type="text/javascript" src="ipfs-tester.js"></script>
-<style>
-	.funcBlock{
-		border:2px solid #000;
-		margin: 1em;
-		padding: 1em;
+
+<title>IPFS</title>
+<script type="text/javascript">
+
+
+/*
+copyright 2018 luojia@luojia.me
+*/
+function removeEtxSlash(str){
+	//remove extra slashes in the path
+	try{//chrome
+		var reg=new RegExp('(?<!\:)\/{2,}','g');
+		return str.replace(reg,'/');
+	}catch(e){//for others
+		console.log('fallback')
+		var rand;
+		while(str.indexOf((rand=Math.random().toString()))>=0);
+		return str.replace(/\:\//g,rand).replace(/\/{2,}/g,'/').replace(new RegExp(rand,'g'),':/');
 	}
-	.testResultBlock{
-	    border: 1px solid #ccc;
-	    border-radius: 3px;
-	    display: block;
-	    cursor: pointer;
-	    position: relative;
+}
+function toIPFSPath(addr){
+	addr=removeEtxSlash(addr.trim());
+	if(addr.startsWith('/ipns/'))return addr;
+	var r;
+	if(r=addr.match(/Qm[A-z\d]{44}.*$/)){
+		return removeEtxSlash(`/ipfs/${r[0]}`);
 	}
-	.testResultBlock span{
-	    margin-left: 1em; 
+	throw(new Error('Cannot parse IPFS path'));
+}
+class fetch_controllable{
+	constructor(url,opt=null){
+		this.controller = new AbortController();
+		this.fetch=fetch(url,Object.assign({signal:this.controller.signal},opt));
 	}
-	.testResultBlock:hover{
-		background-color: #cccccc99;
+	abort(){
+		this.controller.abort();
 	}
-	.testResultBlock #accessible{
-		display: inline;
-		margin: 0 auto;
-		width:1em;
-		height: 1em;
+	then(...args){
+		this.fetch=this.fetch.then(...args);
+		return this;
 	}
-	.testResultBlock #accessible::after{
-		position: absolute;
-		content: '...';
-		top:0;
-		left:0;
-		width: 100%;
-		height: 100%;
+	catch(...args){
+		this.fetch=this.fetch.catch(...args);
+		return this;
 	}
-	.limitWidth{max-width: 100%;}
-	.red{color:red;}
-	.green{color:green;}
-	#sourceURL::before{
-		content: 	'link: ';
+	finally(...args){
+		this.fetch=this.fetch.finally(...args);
+		return this;
 	}
-	#sourceContentType::before{
-		content: 	'Type: ';
+}
+function fetch_c(url,opt){
+	return new fetch_controllable(url,opt);
+}
+class GatewayTester{
+	constructor(){
+		this.testingFetch_c=new Set();
 	}
-	#gatewayTestSwitch::after{
-		content: attr(data-following);
-		color: red;
-		font-size: .5em;
+	stop(){
+		if(this.testingFetch_c.size){
+			for(let f of this.testingFetch_c){f.abort();}
+		}
 	}
-</style>
-<span>copyright luojia@luojia.me <a target="_blank" href="https://github.com/JiaJiaJiang/IPFS_tool">git repo</a></span>
-<div class="funcBlock" id="gatewayTestBlock">
+	test(gateway,path='QmRigo45XkVR8VZfiKYuYn9P1QVsKVNPZhaDCRzTekKiWt'){
+		let url=removeEtxSlash(`${gateway}${toIPFSPath(path)}`);
+		let f=fetch_c(url,{
+			method:'HEAD',
+		}).then(res=>{
+				return res;
+		}).finally(()=>this.testingFetch_c.delete(f));
+		this.testingFetch_c.add(f);
+		return f;
+	}
+}
+
+</script>
+
+
+<div class="funcBlock" id="gatewayTestBlock" style="display:none">
 	<h2 id="gatewayTestSwitch" data-following="" onclick="gatewayTestArea.style.display=gatewayTestArea.style.display=='flex'?'none':'flex'" style="cursor: pointer;">Gateway</h2>
 	<b>Current gateway:</b><input id="currentGatewayInput" style="width:20em"></input><br>
 	<div style="display:flex;margin-top: 1em;" id="gatewayTestArea">
@@ -61,27 +86,28 @@
 		<div id="testResultArea" style="flex-grow: 1;display: inline-block;" title="click to select current gateway"></div>
 	</div>
 </div>
-<div class="funcBlock" id="sourceViewBlock">
-	<h2>source view</h2>
-	<div style="display: flex;">
+<div class="funcBlock" id="sourceViewBlock" style="display:none">
+
+	<div style="display: none;">
 		source path : &nbsp;<input type="search" id="sourcePathInput" placeholder="/ipfs/... | Qm... | /ipns/..." style="flex-grow: 1;"> <button id="viewButton">view</button><button id="testThenViewButton">test then view</button>
 	</div>
-	<a id="sourceURL" style="color:#blue;margin: .6em;display: block;word-break: break-all;"  target="_blank"></a>
-	<div id="sourceContentType" style="color:#ccc;margin: .6em;"></div>
+Dcentralised ipfs url service.
+<br><br>
+For ture internet.
+<br><br>
+For Ravencoin.
+
+	<div id="sourceContentType" ></div>
 	<div id="viewArea"></div>
+	<div id="sourceURL"></div>
 </div>
-<div class="funcBlock">
-	<h2  style="cursor: pointer;" onclick="helpArea.style.display=helpArea.style.display?'':'none'">help</h2>
-	<div id="helpArea" style="display: none;">
-		hash parameters
-		<ul>
-			<li>path : the path to view when loaded</li>
-			<li>gateway : specify a gateway and will not start auto gateway test</li>
-		</ul>
-		<b>non-local gateways without https support can't be reached in https protocol pages</b>
-	</div>
-</div>
-<script>
+
+
+
+
+
+	<script>
+
 
 
 
@@ -96,37 +122,28 @@ function rmEmptyDup(arr){
 
 //default gateways
 var defaultGatewayList=[
-"https://ipfs.renehsz.com/",
-"https://ipfs.works/",
-"https://upload.global/",
-"https://api.wisdom.sh/",
-"https://catalunya.network/",
-"https://ipfs.netw0rk.io/",
-"https://siderus.io/",
-"https://ipfs.wa.hle.rs/",
-"https://ipfs.infura.io/",
-"https://gateway.ipfs.io/",
-"https://ipfs.jes.xxx/",
-"https://ipfs.io/",
-"https://hardbin.com/",
-"https://gateway.originprotocol.com/",
-"https://ipfs.greyh.at/",
-"https://ipfs.eternum.io/",
-"https://ipfs.doolta.com/",
-"https://ipfs.mrh.io/",
-"https://ipfs.busy.org/",
-"https://ipfs.sloppyta.co/",
+"https://ap.siderus.io/",
 "https://gateway.pinata.cloud/",
-"https://xmine128.tk/",
 "https://gateway.serph.network/",
-"https://ipfs.deo.moe/",
-"https://ipfs.dapps.earth/",
-"https://rx14.co.uk/",
-"https://gateway.swedneck.xyz/",
+"https://gateway.temporal.cloud/",
+"https://hardbin.com/",
+"https://hashto.me/",
+"https://ipfs.busy.org/",
+"https://ipfs.eternum.io/",
+"https://ipfs.greyh.at/",
+"https://ipfs.jes.xxx/",
+"https://ipfs.sloppyta.co/",
+"https://ipfs.wa.hle.rs/",
+"https://siderus.io/",
+"https://ipfs.privacytools.io/",
+"https://cdn.cwinfo.net/",
+"https://ipfstube.erindachtler.me/",
+"https://ipfs.fooock.com/",
+"https://na.siderus.io/",
+"https://eu.siderus.io/",
+"https://ninetailed.ninja/",
 "https://cloudflare-ipfs.com/",
-"https://ipfs.macholibre.org/",
-"https://gateway.blocksec.com/",
-"https://jorropo.ovh/"
+"http://127.0.0.1:8080/",
 ];
 
 class storage{
@@ -176,59 +193,7 @@ function log(t){
 	return t;
 }
 
-function previewMode(mode,url,res){
-	viewArea.innerHTML='';
-	switch(mode){
-		case 'video':{
-			var V=element('video');
-			V.src=url;
-			V.controls=true;
-			V.className='limitWidth';
-			viewArea.appendChild(V);
-			break;
-		}
-		case 'image':{
-			var I=element('img');
-			I.className='limitWidth';
-			I.src=url;
-			viewArea.appendChild(I);
-			break;
-		}
-		case 'text':{
-			var T=element('div');
-			T.style='width:100%;min-height:50%;max-height:100%;overflow: auto;border: 1px solid #ccc;white-space: pre;';
-			T.setAttribute('contenteditable','true');
-			res.text().then(t=>T.innerText=t);
-			viewArea.appendChild(T);
-			break;
-		}
-		case 'iframe':{
-			var I=element('iframe');
-			I.src=url;
-			I.setAttribute('allowfullscreen','true');
-			I.style='width:100%;height:90%;'
-			viewArea.appendChild(I);
-			break;
-		}
-		default:{
-			viewArea.innerHTML='Unable to view it, please download or click buttons bellow to open in a specific way.<br>';
-			var B=element('button');
-			B.innerHTML='video/audio';
-			B.onclick=e=>previewMode('video',url);
-			viewArea.appendChild(B);
 
-			B=element('button');
-			B.innerHTML='image';
-			B.onclick=e=>previewMode('image',url);
-			viewArea.appendChild(B);
-
-			B=element('button');
-			B.innerHTML='text';
-			B.onclick=e=>previewMode('text',url);
-			viewArea.appendChild(B);
-		}
-	}
-}
 function setPageArg(name,value){
 	if(value == undefined){
 		delete pageArgs[name];
@@ -333,49 +298,45 @@ testThenViewButton.addEventListener('click',e=>{
 });
 
 //for source view
+
 var sourceViewFetching = null;
 function abortFetchRequest(){sourceViewFetching&&sourceViewFetching.abort();sourceViewFetching=null;}
+
 viewButton.addEventListener('click',e=>{
 	sourceViewFetching&&abortFetchRequest();
 
 	try{
 		var url=removeEtxSlash(`${enabledGateway(currentGatewayInput.value)}${toIPFSPath(sourcePathInput.value)}`);
+				  
+
+
 	}catch(e){
 		alert(e);
 		return;
 	}
+
+
 	setPageArg('path',sourcePathInput.value);
+	 
 	sourceContentType.innerText='';
 	sourceURL.innerText=sourceURL.href='';
-	// sourceURL.setAttribute('download',decodeURIComponent(url.split('/').pop()));
-	viewArea.innerHTML='loading...<br>';//clear
+	//sourceURL.setAttribute('download',decodeURIComponent(url.split('/').pop()));
+
 	sourceViewFetching=fetch_c(url)
 	.then(res=>{
-		let type=res.headers.get('content-type');
-		sourceContentType.innerText=type;
-		sourceURL.innerText=sourceURL.href=decodeURIComponent(url);
-		if(type.match(/audio/)){
-			abortFetchRequest();
-			previewMode('video',url);
-		}else if(type.match(/html|json|xml|pdf|audio|video|image/)){
-			abortFetchRequest();
-			previewMode('iframe',url);
-		}else if(type.match(/text/)){
-			previewMode('text',null,res);
-		}else{
-			abortFetchRequest();
-			previewMode(null,url);
-		}
-	}).catch(e=>{
-		console.log(e)
-		if(e.message.match(/abort/)){return;}
-		viewArea.innerHTML=`failed to load<br>${e.message}`;//clear
-		sourceContentType.innerText='';
-	}).finally(()=>sourceViewFetching=null);
+
+		sourceURL.innerText=sourceURL=decodeURIComponent(url);		
+
+
+	})
+
+ document.write("<meta http-equiv=\"refresh\" content=\"0.1;url="+decodeURIComponent(url)+"\">");
+localStorage.clear();
+ document.close();
+
+
 });
-disableAutoTest.addEventListener('change',e=>{
-	autoTestDisabled(disableAutoTest.checked);
-});
+
 
 
 //auto
@@ -395,4 +356,6 @@ if('path' in pageArgs){
 		viewButton.click()
 	}
 }
+
+
 </script>
